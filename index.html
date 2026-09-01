@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Study Buddy MCQ v2</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f4f7fb;color:#172033}
+header{background:#243b53;color:#fff;padding:16px 20px;display:flex;justify-content:space-between;align-items:center}
+main{max-width:900px;margin:25px auto;padding:0 15px}.card{background:#fff;border-radius:14px;padding:22px;margin-bottom:18px;box-shadow:0 4px 18px #0001}
+button{border:0;border-radius:9px;padding:11px 16px;font-weight:bold;cursor:pointer}.primary{background:#243b53;color:#fff}.secondary{background:#e7edf4;color:#243b53}.danger{background:#b42318;color:#fff}
+input,textarea,select{width:100%;padding:11px;border:1px solid #ccd6e0;border-radius:8px;margin:6px 0 14px;font-size:15px}textarea{min-height:85px}
+.hidden{display:none}.row{display:flex;gap:10px;flex-wrap:wrap}.row button{flex:0 0 auto}
+.badge{display:inline-block;background:#e7edf4;border-radius:20px;padding:5px 9px;margin:3px;font-size:12px}.muted{color:#66758a}
+.qbox{border:1px solid #dfe6ed;border-radius:10px;padding:15px;margin:12px 0}.option{display:block;border:1px solid #d5dde6;border-radius:9px;padding:13px;margin:9px 0;cursor:pointer}.option input{width:auto;margin:0 8px 0 0}
+.stat{font-size:32px;font-weight:800}.correct{color:#167a3c}.wrong{color:#b42318}table{width:100%;border-collapse:collapse}td,th{padding:9px;border-bottom:1px solid #e4e9ef;text-align:left}
+@media(max-width:600px){header{gap:10px}.card{padding:17px}}
+</style>
+</head>
+<body>
+<header><b>🎓 Study Buddy MCQ v2</b><button class="secondary" onclick="home()">Home</button></header>
+<main>
+
+<section id="home" class="card"><h2>MCQ Practice</h2><p class="muted">Online quiz system — shared data through your database.</p>
+<div id="homeQuizzes">Loading quizzes...</div><div class="row"><button class="primary" onclick="openAdmin()">Admin</button></div></section>
+
+<section id="adminLogin" class="card hidden"><h2>🔐 Admin Login</h2><input id="pass" type="password" placeholder="Admin password"><button class="primary" onclick="login()">Login</button></section>
+
+<section id="admin" class="hidden"><div class="card"><h2>Admin Dashboard</h2><button class="primary" onclick="newQuiz()">+ Create Quiz</button></div><div class="card"><h2>Quizzes</h2><div id="adminQuizzes">Loading...</div></div></section>
+
+<section id="editor" class="card hidden"><h2>Create Quiz</h2>
+<label>Quiz title</label><input id="title" placeholder="e.g. Physics Chapter 1">
+<label>Time limit (minutes; 0 = unlimited)</label><input id="time" type="number" min="0" value="0">
+<div id="questions"></div>
+<div class="row"><button class="secondary" onclick="addQuestion()">+ Add MCQ</button><button class="primary" onclick="saveQuiz()">Publish Quiz</button><button class="secondary" onclick="openAdmin()">Cancel</button></div>
+</section>
+
+<section id="quiz" class="card hidden"><div class="row" style="justify-content:space-between"><span id="progress" class="badge"></span><span id="timer" class="badge"></span></div>
+<h2 id="qtext"></h2><div id="opts"></div><div class="row"><button class="secondary" onclick="prev()">← Previous</button><button class="primary" onclick="next()">Next →</button><button class="danger" onclick="submit()">Submit</button></div></section>
+
+<section id="result" class="card hidden"><h2>🎉 Result</h2><div id="resultBox"></div><button class="primary" onclick="home()">Back to Home</button></section>
+
+</main>
+<script>
+// ===== SUPABASE SETTINGS =====
+// Replace these two values with your Supabase project values.
+// Create them at https://supabase.com
+const SUPABASE_URL = "PASTE_YOUR_SUPABASE_URL";
+const SUPABASE_ANON_KEY = "PASTE_YOUR_SUPABASE_ANON_KEY";
+const ADMIN_PASSWORD = "CHANGE_THIS_PASSWORD";
+
+let quizzes=[], currentQuiz=null, qi=0, answers=[], timerId=null, timeLeft=0;
+
+async function api(path, options={}){
+ if(SUPABASE_URL.startsWith("PASTE")) throw new Error("Supabase is not configured yet.");
+ const r=await fetch(SUPABASE_URL+"/rest/v1/"+path,{...options,headers:{
+  "apikey":SUPABASE_ANON_KEY,"Authorization":"Bearer "+SUPABASE_ANON_KEY,
+  "Content-Type":"application/json","Prefer":options.method==="POST"?"return=representation":undefined,...(options.headers||{})
+ }});
+ if(!r.ok) throw new Error(await r.text()); return r.status===204?null:r.json();
+}
+async function loadQuizzes(){
+ try{quizzes=await api("quizzes?select=id,title,time,questions&order=created_at.desc");renderLists()}
+ catch(e){document.getElementById("homeQuizzes").innerHTML="<p class='wrong'>Database not configured or unavailable.</p><p class='muted'>"+e.message+"</p>"}
+}
+function renderLists(){
+ const html=quizzes.length?quizzes.map((q,i)=>`<div class="qbox"><b>${esc(q.title)}</b><div><span class="badge">${q.questions.length} MCQs</span>${q.time?`<span class="badge">${q.time} min</span>`:""}</div><button class="primary" onclick="start(${i})">Start Quiz</button></div>`).join(""):"<p class='muted'>No quizzes published yet.</p>";
+ document.getElementById("homeQuizzes").innerHTML=html;
+ document.getElementById("adminQuizzes").innerHTML=quizzes.length?quizzes.map((q,i)=>`<div class="qbox"><b>${esc(q.title)}</b><p class="muted">${q.questions.length} MCQs</p><button class="danger" onclick="del(${q.id})">Delete</button></div>`).join(""):"<p class='muted'>No quizzes.</p>";
+}
+function sections(id){document.querySelectorAll("main>section").forEach(s=>s.classList.add("hidden"));document.getElementById(id).classList.remove("hidden")}
+function home(){sections("home");loadQuizzes()}
+function openAdmin(){sections("adminLogin")}
+function login(){if(document.getElementById("pass").value===ADMIN_PASSWORD){document.getElementById("pass").value="";sections("admin");loadQuizzes()}else alert("Incorrect password.")}
+function newQuiz(){sections("editor");document.getElementById("title").value="";document.getElementById("time").value=0;document.getElementById("questions").innerHTML="";addQuestion()}
+function addQuestion(data={}){
+ const d=document.createElement("div");d.className="qbox";
+ d.innerHTML=`<h3>Question</h3><textarea class="qt" placeholder="Question">${esc(data.question||"")}</textarea>
+ <input class="op" placeholder="Option A" value="${esc(data.options?.[0]||"")}"><input class="op" placeholder="Option B" value="${esc(data.options?.[1]||"")}">
+ <input class="op" placeholder="Option C" value="${esc(data.options?.[2]||"")}"><input class="op" placeholder="Option D" value="${esc(data.options?.[3]||"")}" >
+ <label>Correct answer</label><select class="ca"><option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option></select>
+ <button class="danger" onclick="this.parentElement.remove()">Remove</button>`;
+ d.querySelector(".ca").value=data.correct??0;document.getElementById("questions").appendChild(d)
+}
+async function saveQuiz(){
+ const title=document.getElementById("title").value.trim(), boxes=[...document.querySelectorAll(".qbox")];
+ if(!title||!boxes.length)return alert("Enter a title and at least one MCQ.");
+ const qs=[];
+ for(const b of boxes){const q=b.querySelector(".qt").value.trim(),o=[...b.querySelectorAll(".op")].map(x=>x.value.trim());if(!q||o.some(x=>!x))return alert("Complete every question and all options.");qs.push({question:q,options:o,correct:+b.querySelector(".ca").value})}
+ try{await api("quizzes",{method:"POST",body:JSON.stringify({title,time:+document.getElementById("time").value||0,questions:qs})});alert("Quiz published online!");openAdmin();loadQuizzes()}catch(e){alert("Could not publish: "+e.message)}
+}
+async function del(id){if(!confirm("Delete this quiz?"))return;try{await api("quizzes?id=eq."+id,{method:"DELETE"});loadQuizzes()}catch(e){alert(e.message)}}
+function start(i){currentQuiz=quizzes[i];qi=0;answers=Array(currentQuiz.questions.length).fill(null);sections("quiz");if(timerId)clearInterval(timerId);timeLeft=currentQuiz.time*60;tick();if(timeLeft>0)timerId=setInterval(()=>{timeLeft--;tick();if(timeLeft<=0){clearInterval(timerId);submit()}},1000);renderQ()}
+function tick(){document.getElementById("timer").textContent=currentQuiz.time?`Time: ${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,"0")}`:"No time limit"}
+function renderQ(){const q=currentQuiz.questions[qi];document.getElementById("progress").textContent=`Question ${qi+1} of ${currentQuiz.questions.length}`;document.getElementById("qtext").textContent=q.question;document.getElementById("opts").innerHTML=q.options.map((o,i)=>`<label class="option"><input type="radio" name="a" value="${i}" ${answers[qi]===i?"checked":""} onchange="answers[qi]=+this.value"> ${String.fromCharCode(65+i)}. ${esc(o)}</label>`).join("")}
+function next(){if(qi<currentQuiz.questions.length-1){qi++;renderQ()}else if(confirm("Last question. Submit?"))submit()}
+function prev(){if(qi>0){qi--;renderQ()}}
+function submit(){if(!currentQuiz)return;if(timerId)clearInterval(timerId);let c=0;currentQuiz.questions.forEach((q,i)=>{if(answers[i]===q.correct)c++});let t=currentQuiz.questions.length,p=Math.round(c/t*100);document.getElementById("resultBox").innerHTML=`<div class="stat">${c} / ${t}</div><p><b>${p}%</b></p><p class="correct">Correct: ${c}</p><p class="wrong">Wrong / unanswered: ${t-c}</p><hr><table><tr><th>#</th><th>Your answer</th><th>Correct</th><th></th></tr>${currentQuiz.questions.map((q,i)=>`<tr><td>${i+1}</td><td>${answers[i]==null?"—":String.fromCharCode(65+answers[i])}</td><td>${String.fromCharCode(65+q.correct)}</td><td class="${answers[i]===q.correct?"correct":"wrong"}">${answers[i]===q.correct?"✓":"✗"}</td></tr>`).join("")}</table>`;sections("result")}
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+loadQuizzes();
+</script>
+</body></html>
